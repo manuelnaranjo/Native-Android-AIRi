@@ -24,7 +24,7 @@
             </intent-filter>
         </activity>
         
-        <activity android:name=".BluetoothInquirynquiry">
+        <activity android:name=".BluetoothInquiry">
             <action android:name="android.intent.action.VIEW" 
                     android:label="@string/select_new_device"
                  	android:theme="@android:style/Theme.Dialog"
