@@ -13,8 +13,9 @@ public class AIRiService extends Thread {
 	private final static int BUFFER_SIZE=2048*1536*3;
 	private final static int BLOCK_SIZE=1024;
 	public final static int CONNECTION_STABLISHED = 1;
-	public final static int CONNECTION_FAILED = 2;
-	public final static int PICTURE_AVAILABLE = 3;
+	public final static int CONNECTION_FINISHED = 2;
+	public final static int CONNECTION_FAILED = 3;
+	public final static int PICTURE_AVAILABLE = 4;
 	private final BluetoothSocket mSocket;
 	private int head;
 	private InputStream mIn;
@@ -97,7 +98,7 @@ public class AIRiService extends Thread {
 	}
 
 	public boolean setFlash(boolean s) {
-		return this.sendCommand('S', s==true?"1":"0");
+		return this.sendCommand('F', s==true?"1":"0");
 	}
 	
 	public boolean doPan(PAN p){
@@ -199,7 +200,9 @@ public class AIRiService extends Thread {
 				}
 			} catch (IOException e) {
 				e.printStackTrace();
+				break;
 			}
 		}
+		mHandler.obtainMessage(CONNECTION_FINISHED);
 	}
 }

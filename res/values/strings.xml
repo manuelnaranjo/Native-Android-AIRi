@@ -9,4 +9,19 @@
 	<string name="bluetooth_inquiry">Discovering More Devices</string>
 	<string name="connection_ok">Connected to Device</string>
 	<string name="connection_failed">Failed to Connect</string>
+	<string name="connection_done">Connection Completed</string>
+	<string name="bluetooth_connect">Connect to Camera</string>
+	<string name="bluetooth_disconnect">Disconnect from Camera</string>
+	
+	<string name="menu_size">Resolution</string>
+	<string name="menu_flash">Flash</string>
+	<string name="menu_pan">Pan</string>
+	<string name="menu_exposure">Exposure</string>
+	<string name="on">On</string>
+	<string name="off">Off</string>
+	
+	<string name="menu_pan_u">Up</string>
+	<string name="menu_pan_d">Down</string>
+	<string name="menu_pan_l">Left</string>
+	<string name="menu_pan_r">Right</string>
 </resources>
