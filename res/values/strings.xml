@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="hello">Hello World, AIRiActivity!</string>
+    <string name="app_name">AIRi</string>
+    <string name="select_new_device">Select New Device</string>
+    <string name="no_bluetooth">Your device does not support Bluetooth. This application requires Bluetooth for running</string>
+    <string name="activate_bluetooth">Activating Bluetooth</string>
+	<string name="bluetooth_inquiry">Discovering More Devices</string>
+	<string name="connection_ok">Connected to Device</string>
+	<string name="connection_failed">Failed to Connect</string>
+</resources>
