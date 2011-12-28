@@ -64,7 +64,6 @@ public class BluetoothInquiry extends ListActivity {
 	protected void onResume() {
 		if (D) Log.d(TAG, "onResume");
 		super.onResume();
-		this.running = true;
 		this.startDiscovery();
 	}
 
@@ -83,7 +82,7 @@ public class BluetoothInquiry extends ListActivity {
                 
                 BluetoothDeviceWrapper w = new BluetoothDeviceWrapper(d);
                 int i = mArrayAdapter.getPosition(w);
-                if (i>0)
+                if (i>-1)
                 	mArrayAdapter.remove(w);
                 mArrayAdapter.add(w);
                 mArrayAdapter.notifyDataSetChanged();
@@ -148,10 +147,11 @@ public class BluetoothInquiry extends ListActivity {
 				i.putExtra(EXTRA_ADDRESS, mArrayAdapter.getItem(position).address);
 				setResult(RESULT_OK, i);
 				running = false;
-				finish();
+				BluetoothInquiry.this.finish();
 			}
 		});
 		lv.setAdapter(mArrayAdapter);
+		this.running = true;
 	}
 
 	class BluetoothDeviceWrapper {

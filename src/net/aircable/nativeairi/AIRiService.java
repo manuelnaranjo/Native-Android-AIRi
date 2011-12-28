@@ -10,7 +10,7 @@ import android.os.Handler;
 import android.util.Log;
 
 public class AIRiService extends Thread {
-	private final static int BUFFER_SIZE=2048*1536*3;
+	private final static int BUFFER_SIZE=2048*1536;
 	private final static int BLOCK_SIZE=1024;
 	public final static int CONNECTION_STABLISHED = 1;
 	public final static int CONNECTION_FINISHED = 2;
@@ -69,6 +69,7 @@ public class AIRiService extends Thread {
 			this.mOut.write(arg.getBytes());
 			this.mOut.write(13);
 			this.mOut.write(10);
+			this.mOut.flush();
 			return true;
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -203,6 +204,6 @@ public class AIRiService extends Thread {
 				break;
 			}
 		}
-		mHandler.obtainMessage(CONNECTION_FINISHED);
+		mHandler.obtainMessage(CONNECTION_FINISHED).sendToTarget();
 	}
 }

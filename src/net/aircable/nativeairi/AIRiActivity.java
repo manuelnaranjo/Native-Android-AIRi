@@ -4,12 +4,13 @@ import java.io.IOException;
 
 import net.aircable.nativeairi.AIRiService.PAN;
 import net.aircable.nativeairi.AIRiService.SIZE;
-
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
@@ -19,6 +20,7 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.SubMenu;
+import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.Toast;
 
@@ -34,13 +36,34 @@ public class AIRiActivity extends Activity {
 	private BluetoothSocket mSocket;
 	private AIRiService mService;
 	private ImageView mImgDisplay;
+	private SharedPreferences mPreferences;
+	
+	enum STATES {
+		IDLE,
+		SCANNING,
+		PAIRED,
+		CONNECTING,
+		CONNECTED,
+	}
+	private STATES mState;
+	
+	public static final String SETTINGS="AIRiNativeSettings";
+	public static final String SETTINGS_TARGET="target";
 	
 	private static final int AIRCABLE_SPP = 1;
+	
+	@Override
+	public void onBackPressed() {
+		if (this.mState!=STATES.IDLE)
+			return;
+		super.onBackPressed();
+	}
 	
     /** Called when the activity is first created. */
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        this.mState=STATES.IDLE;
         setContentView(R.layout.main);
         
         mBtAdapter = BluetoothAdapter.getDefaultAdapter();
@@ -58,6 +81,7 @@ public class AIRiActivity extends Activity {
     }
     
     private void doScan(){
+    	mState = STATES.SCANNING;
     	startActivityForResult(
 				new Intent(this, BluetoothInquiry.class),
 				SELECT_NEW_DEVICE);
@@ -68,9 +92,43 @@ public class AIRiActivity extends Activity {
 	protected void onResume() {
 		if (D) Log.d(TAG, "onResume");
 		super.onResume();
+		
+		if (this.mState == STATES.CONNECTED){
+			return;
+		}
 		mImgDisplay = (ImageView)this.findViewById(R.id.img);
-		if (mDevice == null)
-			doScan();
+		mPreferences = this.getSharedPreferences(SETTINGS, MODE_PRIVATE);
+		if (mPreferences.contains(SETTINGS_TARGET)) {
+			String addr = mPreferences.getString(SETTINGS_TARGET, null);
+			if (BluetoothAdapter.checkBluetoothAddress(addr)){
+				setRemote(addr);
+				return;
+			}
+		}
+		Editor e = mPreferences.edit();
+		e.remove(SETTINGS_TARGET);
+		e.commit();
+		doScan();
+	}
+		
+	private void setRemote(String addr){
+		this.mState = STATES.CONNECTING;
+		mImgDisplay.setImageDrawable(getResources().getDrawable(R.drawable.ic_launcher_airi_72));
+		BluetoothDevice device = mBtAdapter.getRemoteDevice(addr);
+		Editor e = this.mPreferences.edit();
+		e.putString(SETTINGS_TARGET, addr);
+		e.commit();
+		mDevice = device;
+		mIDevice = new ImprovedBluetoothDevice(mDevice);
+		mBtAdapter.cancelDiscovery();
+		try {
+			mSocket = mIDevice.createInsecureRfcommSocket(AIRCABLE_SPP);
+			mService = new AIRiService(mSocket, mHandler);
+			mService.start();
+		} catch (Exception e1) {
+			e1.printStackTrace();
+		}
+		
 	}
 	
 	public void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -78,43 +136,43 @@ public class AIRiActivity extends Activity {
         switch (requestCode) {
         case SELECT_NEW_DEVICE:
             // When DeviceListActivity returns with a device to connect
-            if (resultCode == Activity.RESULT_OK && mDevice == null) {
+            if (resultCode == Activity.RESULT_OK && mState == STATES.SCANNING) {
                 // Get the device MAC address
                 String address = data.getExtras()
                                      .getString(BluetoothInquiry.EXTRA_ADDRESS);
                 this.finishActivity(SELECT_NEW_DEVICE);
-                // Get the BLuetoothDevice object
-                BluetoothDevice device = mBtAdapter.getRemoteDevice(address);
-                if (D) Log.d(TAG, "Using " + device);
-                mDevice = device;
-                mIDevice = new ImprovedBluetoothDevice(mDevice);
-                mBtAdapter.cancelDiscovery();
-                try {
-					mSocket = mIDevice.createInsecureRfcommSocket(AIRCABLE_SPP);
-					mService = new AIRiService(mSocket, mHandler);
-					mService.start();
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
+                
+                this.setRemote(address);
             }
             break;
         }
     }
 	
 	private void BluetoothConnected(){
+		if (D)Log.d(TAG, "BluetoothDisconnected");
+		mState = STATES.CONNECTED;
 		this.runOnUiThread(new Runnable(){
 			public void run(){
 				Toast.makeText(getApplicationContext(), 
 						getString(R.string.connection_ok), Toast.LENGTH_LONG).show();
-				mService.setSize(AIRiService.SIZE.QVGA);
-				mService.setLink(true);
+				try{
+					mService.setSize(AIRiService.SIZE.QVGA);
+					mService.setLink(true);
+				} catch (Exception e){
+					disconnect();
+					return;
+				}
+				getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
 			}
 		});
 	}
 	
 	private void BluetoothDisconnected(){
+		if (D)Log.d(TAG, "BluetoothDisconnected");
+		mState = STATES.IDLE;
 		this.runOnUiThread(new Runnable(){
 			public void run(){
+				getWindow().clearFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
 				Toast.makeText(getApplicationContext(), 
 						getString(R.string.connection_done), Toast.LENGTH_LONG).show();
 			}
@@ -123,13 +181,12 @@ public class AIRiActivity extends Activity {
 	
 	
 	private void BluetoothNotConnected(){
+		if (D)Log.d(TAG, "BluetoothDisconnected");
+		mState = STATES.IDLE;
 		this.runOnUiThread(new Runnable(){
 			public void run(){
 				Toast.makeText(getApplicationContext(), 
 						getString(R.string.connection_failed), Toast.LENGTH_LONG).show();
-				mDevice = null;
-				mService = null;
-				mIDevice = null;
 			}
 		});	
 	}
@@ -172,10 +229,11 @@ public class AIRiActivity extends Activity {
 	};
 
 	private static final int MENU_CONNECT=1;
-	private static final int MENU_SIZE=2;
-	private static final int MENU_FLASH=3;
-	private static final int MENU_PAN=4;
-	private static final int MENU_EXPOSURE=5;
+	private static final int MENU_FORGET=2;
+	private static final int MENU_SIZE=3;
+	private static final int MENU_FLASH=4;
+	private static final int MENU_PAN=5;
+	private static final int MENU_EXPOSURE=6;
 	
 	private static final int MENU_SIZE_QVGA=100;
 	private static final int MENU_SIZE_VGA=101;
@@ -205,8 +263,11 @@ public class AIRiActivity extends Activity {
 	@Override
 	public boolean onPrepareOptionsMenu(Menu menu) {
 		menu.clear();
-		if (mDevice!=null){
+		if (mState!=STATES.IDLE){
 			menu.add(0, MENU_CONNECT, 0, this.getString(R.string.bluetooth_disconnect));
+			if (this.mPreferences.contains(SETTINGS_TARGET))
+				menu.add(0, MENU_FORGET, 1, this.getString(R.string.bluetooth_forget));
+			
 			SubMenu s = menu.addSubMenu(0, MENU_SIZE, 1, this.getString(R.string.menu_size));
 			s.add(0, MENU_SIZE_QVGA, 0, "QVGA");
 			s.add(0, MENU_SIZE_VGA, 1, "VGA");
@@ -236,83 +297,103 @@ public class AIRiActivity extends Activity {
 			s.add(0, MENU_EXPOSURE_2000, 0, "2s");
 		} else {
 			menu.add(0, MENU_CONNECT, 0, this.getString(R.string.bluetooth_connect));
+			if (this.mPreferences.contains(SETTINGS_TARGET))
+				menu.add(0, MENU_FORGET, 1, this.getString(R.string.bluetooth_forget));
 		}
 		return true;
 	}
 
+	private void disconnect()
+	{
+		try {
+			this.mSocket.close();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		this.mIDevice = null;
+		this.mDevice = null;
+		this.mService = null; 
+		this.mState = STATES.IDLE;
+	}
+	
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		switch (item.getItemId()){
+		case MENU_FORGET:
+			Editor ed = this.mPreferences.edit();
+			ed.remove(SETTINGS_TARGET);
+			ed.commit();
+			break;
 		case MENU_CONNECT:
-			if (this.mDevice!=null){
-				try {
-					this.mSocket.close();
-				} catch (IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-				this.mIDevice = null;
-				this.mDevice = null;
-				this.mService = null; 
+			if (this.mState==STATES.CONNECTED || this.mState==STATES.CONNECTING){
+				this.disconnect(); 
 			} else {
+				if (mPreferences.contains(SETTINGS_TARGET)) {
+					String addr = mPreferences.getString(SETTINGS_TARGET, null);
+					if (BluetoothAdapter.checkBluetoothAddress(addr)){
+						setRemote(addr);
+						return true;
+					}
+				}
 				this.doScan();
 			}
 			return true;
 			
 		case MENU_SIZE_QVGA:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.QVGA);
 			return true;
 		case MENU_SIZE_VGA:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.VGA);
 			return true;
 		case MENU_SIZE_XGA:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.XGA);
 			return true;
 		case MENU_SIZE_QXGA:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.QXGA);
 			return true;
 		case MENU_SIZE_720P:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.P720);
 			return true;
 		case MENU_SIZE_QVGA_Z1:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.QVGA_Zoom1);
 			return true;
 		case MENU_SIZE_QVGA_Z2:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.QVGA_Zoom2);
 			return true;
 		case MENU_SIZE_QVGA_Z3:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.QVGA_Zoom3);
 			return true;
 		case MENU_FLASH_ON:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setFlash(true);
 			return true;
 		case MENU_FLASH_OFF:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setFlash(false);
 			return true;
 		case MENU_PAN_U:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.doPan(PAN.UP);
 			return true;
 		case MENU_PAN_L:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.doPan(PAN.LEFT);
 			return true;
 		case MENU_PAN_R:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.doPan(PAN.RIGHT);
 			return true;
 		case MENU_PAN_D:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.doPan(PAN.DOWN);
 			return true;
 		case MENU_EXPOSURE_66:
@@ -321,7 +402,7 @@ public class AIRiActivity extends Activity {
 		case MENU_EXPOSURE_533:
 		case MENU_EXPOSURE_1000:
 		case MENU_EXPOSURE_2000:
-			if (this.mService!=null)
+			if (this.mState==STATES.CONNECTED)
 				this.mService.setExposure(item.getItemId()-MENU_EXPOSURE_BASE);
 			return true;
 		}
