@@ -10,18 +10,21 @@ import android.os.Handler;
 import android.util.Log;
 
 public class AIRiService extends Thread {
-	private final static int BUFFER_SIZE=2048*1536;
+	private final static int BUFFER_SIZE=2048*1536/5; // asume worst compression level is 20%
 	private final static int BLOCK_SIZE=1024;
 	public final static int CONNECTION_STABLISHED = 1;
 	public final static int CONNECTION_FINISHED = 2;
 	public final static int CONNECTION_FAILED = 3;
 	public final static int PICTURE_AVAILABLE = 4;
+	public final static int OUT_OF_MEMORY = -1;
 	private final BluetoothSocket mSocket;
 	private int head;
 	private InputStream mIn;
 	private OutputStream mOut;
 	private final Handler mHandler;
-	private byte[] mBuffer;
+	private static byte[] mBuffer;
+	
+	private boolean running;
 	
 	private final String TAG = "AIRiService";
 	private final boolean D = true;
@@ -44,14 +47,33 @@ public class AIRiService extends Thread {
 		RIGHT
 	}
 	
+	private static AIRiService sInstance;
+	
 	public AIRiService(BluetoothSocket socket, Handler handler){
 		super();
+		
+		if (sInstance != null) 
+			throw new RuntimeException("Instance is running all ready");
 		this.setName("AIRiService");
 		this.setDaemon(true);
 		this.mSocket = socket;
 		this.head = 0;
 		this.mHandler = handler;
-		this.mBuffer = new byte[BUFFER_SIZE];
+		if (mBuffer == null)
+			try {
+				mBuffer = new byte[BUFFER_SIZE];
+			} catch (OutOfMemoryError e) {
+				Log.e(TAG, "out of RAM", e);
+				mHandler.obtainMessage(OUT_OF_MEMORY, BUFFER_SIZE).sendToTarget();
+				this.running = false;
+				return;
+			}
+		sInstance = this;
+		this.running = true;
+	}
+	
+	public void stopService() {
+		this.running = false;
 	}
 	
 	private void close(){
@@ -145,6 +167,7 @@ public class AIRiService extends Thread {
 			close();
 			mHandler.obtainMessage(CONNECTION_FAILED).sendToTarget();
 			Log.e(TAG, "Failed", e);
+			sInstance = null;
 			return;
 		}
 		
@@ -157,16 +180,21 @@ public class AIRiService extends Thread {
 			Log.e(TAG, "Failed", e);
 			close();
 			mHandler.obtainMessage(CONNECTION_FAILED).sendToTarget();
+			sInstance = null;
 			return;
 		}
 		
 		int i, start=-1, end=-1;
 		int read;
 		
-		mHandler.obtainMessage(CONNECTION_STABLISHED).sendToTarget();
+		mHandler.postDelayed(new Runnable(){
+			public void run() {
+				mHandler.obtainMessage(CONNECTION_STABLISHED).sendToTarget();
+			}
+		}, 1000);
 		
 		//allocate enough space for a full non compressed frame
-		while (true){
+		while (this.running){
 			try {
 				read=this.mIn.read(mBuffer, head, BLOCK_SIZE);
 				if (D)Log.d(TAG, "Read " + read + " head " + head);
@@ -205,5 +233,6 @@ public class AIRiService extends Thread {
 			}
 		}
 		mHandler.obtainMessage(CONNECTION_FINISHED).sendToTarget();
+		sInstance = null;
 	}
 }

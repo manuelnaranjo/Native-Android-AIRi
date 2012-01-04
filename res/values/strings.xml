@@ -25,4 +25,6 @@
 	<string name="menu_pan_d">Down</string>
 	<string name="menu_pan_l">Left</string>
 	<string name="menu_pan_r">Right</string>
+
+	<string name="out_of_memory">No More Memory Available, This Application Requires: </string>
 </resources>

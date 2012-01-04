@@ -8,6 +8,7 @@ import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
@@ -159,6 +160,7 @@ public class AIRiActivity extends Activity {
 					mService.setSize(AIRiService.SIZE.QVGA);
 					mService.setLink(true);
 				} catch (Exception e){
+					Log.e(TAG, "found issue", e);
 					disconnect();
 					return;
 				}
@@ -223,17 +225,24 @@ public class AIRiActivity extends Activity {
 			case AIRiService.CONNECTION_FINISHED:
 				BluetoothDisconnected();
 				break;
+			case AIRiService.OUT_OF_MEMORY:
+				Context c = getApplicationContext();
+				Toast.makeText(c, 
+						c.getText(R.string.out_of_memory)+Integer.toString(msg.arg1), 
+						Toast.LENGTH_LONG).show();
+				break;
 			}
 		}
 		
 	};
 
 	private static final int MENU_CONNECT=1;
-	private static final int MENU_FORGET=2;
-	private static final int MENU_SIZE=3;
-	private static final int MENU_FLASH=4;
-	private static final int MENU_PAN=5;
-	private static final int MENU_EXPOSURE=6;
+	private static final int MENU_DISCONNECT=2;
+	private static final int MENU_FORGET=3;
+	private static final int MENU_SIZE=4;
+	private static final int MENU_FLASH=5;
+	private static final int MENU_PAN=6;
+	private static final int MENU_EXPOSURE=7;
 	
 	private static final int MENU_SIZE_QVGA=100;
 	private static final int MENU_SIZE_VGA=101;
@@ -264,7 +273,7 @@ public class AIRiActivity extends Activity {
 	public boolean onPrepareOptionsMenu(Menu menu) {
 		menu.clear();
 		if (mState!=STATES.IDLE){
-			menu.add(0, MENU_CONNECT, 0, this.getString(R.string.bluetooth_disconnect));
+			menu.add(0, MENU_DISCONNECT, 0, this.getString(R.string.bluetooth_disconnect));
 			if (this.mPreferences.contains(SETTINGS_TARGET))
 				menu.add(0, MENU_FORGET, 1, this.getString(R.string.bluetooth_forget));
 			
@@ -305,7 +314,12 @@ public class AIRiActivity extends Activity {
 
 	private void disconnect()
 	{
+		if (mService!=null)
+			mService.stopService();
 		try {
+			
+			this.mSocket.getInputStream().close();
+			this.mSocket.getOutputStream().close();
 			this.mSocket.close();
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
@@ -324,22 +338,20 @@ public class AIRiActivity extends Activity {
 			Editor ed = this.mPreferences.edit();
 			ed.remove(SETTINGS_TARGET);
 			ed.commit();
-			break;
-		case MENU_CONNECT:
-			if (this.mState==STATES.CONNECTED || this.mState==STATES.CONNECTING){
-				this.disconnect(); 
-			} else {
-				if (mPreferences.contains(SETTINGS_TARGET)) {
-					String addr = mPreferences.getString(SETTINGS_TARGET, null);
-					if (BluetoothAdapter.checkBluetoothAddress(addr)){
-						setRemote(addr);
-						return true;
-					}
-				}
-				this.doScan();
-			}
 			return true;
-			
+		case MENU_DISCONNECT:
+			this.disconnect();
+			return true;
+		case MENU_CONNECT:
+			if (mPreferences.contains(SETTINGS_TARGET)) {
+				String addr = mPreferences.getString(SETTINGS_TARGET, null);
+				if (BluetoothAdapter.checkBluetoothAddress(addr)){
+					setRemote(addr);
+					return true;
+				}
+			}
+			this.doScan();
+			return true;
 		case MENU_SIZE_QVGA:
 			if (this.mState==STATES.CONNECTED)
 				this.mService.setSize(SIZE.QVGA);
@@ -407,6 +419,5 @@ public class AIRiActivity extends Activity {
 			return true;
 		}
 		return super.onOptionsItemSelected(item);
-	}
-	
+	}	
 }
