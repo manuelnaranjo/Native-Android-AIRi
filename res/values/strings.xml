@@ -18,6 +18,7 @@
 	<string name="menu_flash">Flash</string>
 	<string name="menu_pan">Pan</string>
 	<string name="menu_exposure">Exposure</string>
+	<string name="menu_exit">Exit</string>
 	<string name="on">On</string>
 	<string name="off">Off</string>
 	

@@ -12,6 +12,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
+import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
@@ -123,7 +124,8 @@ public class AIRiActivity extends Activity {
 		mIDevice = new ImprovedBluetoothDevice(mDevice);
 		mBtAdapter.cancelDiscovery();
 		try {
-			mSocket = mIDevice.createInsecureRfcommSocket(AIRCABLE_SPP);
+			mSocket = mIDevice.createRfcommSocket(AIRCABLE_SPP);
+			//mSocket = mIDevice.createLCAPSocket(0x1001);
 			mService = new AIRiService(mSocket, mHandler);
 			mService.start();
 		} catch (Exception e1) {
@@ -149,12 +151,13 @@ public class AIRiActivity extends Activity {
         }
     }
 	
-	private void BluetoothConnected(){
-		if (D)Log.d(TAG, "BluetoothDisconnected");
+	private void BluetoothConnected(final boolean display){
+		if (D)Log.d(TAG, "BluetoothConnected");
 		mState = STATES.CONNECTED;
 		this.runOnUiThread(new Runnable(){
 			public void run(){
-				Toast.makeText(getApplicationContext(), 
+				if (display)
+					Toast.makeText(getApplicationContext(), 
 						getString(R.string.connection_ok), Toast.LENGTH_LONG).show();
 				try{
 					mService.setSize(AIRiService.SIZE.QVGA);
@@ -165,6 +168,8 @@ public class AIRiActivity extends Activity {
 					return;
 				}
 				getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+				getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+				setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
 			}
 		});
 	}
@@ -175,6 +180,8 @@ public class AIRiActivity extends Activity {
 		this.runOnUiThread(new Runnable(){
 			public void run(){
 				getWindow().clearFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+				getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+				setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
 				Toast.makeText(getApplicationContext(), 
 						getString(R.string.connection_done), Toast.LENGTH_LONG).show();
 			}
@@ -213,7 +220,13 @@ public class AIRiActivity extends Activity {
 			
 			switch (msg.what) {
 			case AIRiService.CONNECTION_STABLISHED:
-				BluetoothConnected();
+				BluetoothConnected(true);
+				this.postDelayed(new Runnable(){
+					public void run(){
+						if (mService!=null && mService.isDirty())
+							BluetoothConnected(false);
+					}
+				}, 4*1000);
 				break;
 			case AIRiService.CONNECTION_FAILED:
 				BluetoothNotConnected();
@@ -243,6 +256,7 @@ public class AIRiActivity extends Activity {
 	private static final int MENU_FLASH=5;
 	private static final int MENU_PAN=6;
 	private static final int MENU_EXPOSURE=7;
+	private static final int MENU_EXIT=8;
 	
 	private static final int MENU_SIZE_QVGA=100;
 	private static final int MENU_SIZE_VGA=101;
@@ -274,8 +288,8 @@ public class AIRiActivity extends Activity {
 		menu.clear();
 		if (mState!=STATES.IDLE){
 			menu.add(0, MENU_DISCONNECT, 0, this.getString(R.string.bluetooth_disconnect));
-			if (this.mPreferences.contains(SETTINGS_TARGET))
-				menu.add(0, MENU_FORGET, 1, this.getString(R.string.bluetooth_forget));
+			//if (this.mPreferences.contains(SETTINGS_TARGET))
+			//	menu.add(0, MENU_FORGET, 1, this.getString(R.string.bluetooth_forget));
 			
 			SubMenu s = menu.addSubMenu(0, MENU_SIZE, 1, this.getString(R.string.menu_size));
 			s.add(0, MENU_SIZE_QVGA, 0, "QVGA");
@@ -304,31 +318,44 @@ public class AIRiActivity extends Activity {
 			s.add(0, MENU_EXPOSURE_533, 0, "533ms");
 			s.add(0, MENU_EXPOSURE_1000, 0, "1s");
 			s.add(0, MENU_EXPOSURE_2000, 0, "2s");
+			
+			menu.add(0, MENU_EXIT, 5, this.getString(R.string.menu_exit));
 		} else {
 			menu.add(0, MENU_CONNECT, 0, this.getString(R.string.bluetooth_connect));
 			if (this.mPreferences.contains(SETTINGS_TARGET))
 				menu.add(0, MENU_FORGET, 1, this.getString(R.string.bluetooth_forget));
+			menu.add(0, MENU_EXIT, 2, this.getString(R.string.menu_exit));
 		}
 		return true;
 	}
 
 	private void disconnect()
 	{
-		if (mService!=null)
-			mService.stopService();
-		try {
-			
-			this.mSocket.getInputStream().close();
-			this.mSocket.getOutputStream().close();
-			this.mSocket.close();
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-		this.mIDevice = null;
-		this.mDevice = null;
-		this.mService = null; 
-		this.mState = STATES.IDLE;
+		new Thread(){
+			public void run(){
+				if (mService!=null)
+					mService.stopService();
+				try {
+					mSocket.getInputStream().close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				try {
+					mSocket.getOutputStream().close();
+				} catch (IOException e){
+					e.printStackTrace();
+				}
+				try {
+					mSocket.close();
+				} catch (IOException e){
+					
+				}
+				mIDevice = null;
+				mDevice = null;
+				mService = null; 
+				mState = STATES.IDLE;		
+			}
+		}.start();
 	}
 	
 	@Override
@@ -416,6 +443,21 @@ public class AIRiActivity extends Activity {
 		case MENU_EXPOSURE_2000:
 			if (this.mState==STATES.CONNECTED)
 				this.mService.setExposure(item.getItemId()-MENU_EXPOSURE_BASE);
+			return true;	
+		case MENU_EXIT:
+			if (this.mService!=null)
+				this.mService.stopService();
+			if (this.mSocket!=null)
+				try {
+					this.mSocket.close();
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			this.mService=null;
+			this.mSocket=null;
+			System.gc();
+			this.finish();
 			return true;
 		}
 		return super.onOptionsItemSelected(item);

@@ -10,8 +10,8 @@ import android.os.Handler;
 import android.util.Log;
 
 public class AIRiService extends Thread {
-	private final static int BUFFER_SIZE=2048*1536/5; // asume worst compression level is 20%
-	private final static int BLOCK_SIZE=1024;
+	private final static int BUFFER_SIZE=150*1024; // assume no frame is going to be over 150KB
+	private final static int BLOCK_SIZE=4096;
 	public final static int CONNECTION_STABLISHED = 1;
 	public final static int CONNECTION_FINISHED = 2;
 	public final static int CONNECTION_FAILED = 3;
@@ -22,7 +22,9 @@ public class AIRiService extends Thread {
 	private InputStream mIn;
 	private OutputStream mOut;
 	private final Handler mHandler;
-	private static byte[] mBuffer;
+	private static int[] mBuffer;
+	private static byte[] sBuffer;
+	private static byte[] mTempBuffer;
 	
 	private boolean running;
 	
@@ -48,6 +50,7 @@ public class AIRiService extends Thread {
 	}
 	
 	private static AIRiService sInstance;
+	private boolean dirty;
 	
 	public AIRiService(BluetoothSocket socket, Handler handler){
 		super();
@@ -61,7 +64,25 @@ public class AIRiService extends Thread {
 		this.mHandler = handler;
 		if (mBuffer == null)
 			try {
-				mBuffer = new byte[BUFFER_SIZE];
+				mBuffer = new int[BUFFER_SIZE];
+			} catch (OutOfMemoryError e) {
+				Log.e(TAG, "out of RAM", e);
+				mHandler.obtainMessage(OUT_OF_MEMORY, BUFFER_SIZE).sendToTarget();
+				this.running = false;
+				return;
+			}
+		if (mTempBuffer == null)
+			try {
+				mTempBuffer = new byte[BLOCK_SIZE];
+			} catch (OutOfMemoryError e) {
+				Log.e(TAG, "out of RAM", e);
+				mHandler.obtainMessage(OUT_OF_MEMORY, BLOCK_SIZE).sendToTarget();
+				this.running = false;
+				return;
+			}
+		if (sBuffer == null)
+			try {
+				sBuffer = new byte[BUFFER_SIZE];
 			} catch (OutOfMemoryError e) {
 				Log.e(TAG, "out of RAM", e);
 				mHandler.obtainMessage(OUT_OF_MEMORY, BUFFER_SIZE).sendToTarget();
@@ -159,7 +180,9 @@ public class AIRiService extends Thread {
 	}
 	
 	public void run(){
+		
 		if (D) Log.d(TAG, "Connecting");
+		dirty = true;
 		try {
 			mSocket.connect(); 
 		} catch (IOException e) {
@@ -184,7 +207,7 @@ public class AIRiService extends Thread {
 			return;
 		}
 		
-		int i, start=-1, end=-1;
+		int i, start=0, end=0;
 		int read;
 		
 		mHandler.postDelayed(new Runnable(){
@@ -196,36 +219,48 @@ public class AIRiService extends Thread {
 		//allocate enough space for a full non compressed frame
 		while (this.running){
 			try {
-				read=this.mIn.read(mBuffer, head, BLOCK_SIZE);
-				if (D)Log.d(TAG, "Read " + read + " head " + head);
-				for (i=0; i<head+read; i++){
-					if (mBuffer[i]==-1) { 
+				read=this.mIn.read(mTempBuffer, 0, BLOCK_SIZE);
+				if (head+read>=BUFFER_SIZE)
+					head = 0;
+				for (i=0; i<read;i++)
+					mBuffer[i+head]=mTempBuffer[i] & 0xff;
+				//if (D)Log.d(TAG, "Read " + read + " head " + head);
+				if (read == -1)
+					break;
+				for (i=0; i<head+read-2; i++){
+					if (mBuffer[i]==0xff) { 
 						//bytes in java are signed, so we can't just compare to 0xff
 						//if (D)Log.d(TAG, "Found 0xff " + i);
 						i++;
-						if (mBuffer[i]==-40){
-							if (D)Log.d(TAG, "Found 0xd8 " + i);
+						if (mBuffer[i]==0xd8){
+							//if (D)Log.d(TAG, "Found 0xd8 " + i);
 							start = i-1;
-						} else if (mBuffer[i]==-39) {
-							if (D)Log.d(TAG, "Found 0xd9 " + i);
+						} else if (mBuffer[i]==0xd9) {
+							//if (D)Log.d(TAG, "Found 0xd9 " + i);
 							end = i-1;
 							if (start>-1 && end>start)
 								i=head+read; // force loop to complete
-						}
+						} //else
+						//	if (D)Log.d(TAG, String.format("Found 0x%02x", mBuffer[i]));
 					}
 				}
 				head+=read;
 					
 				if (start>-1 && end>start){
-					if (D) Log.d(TAG,
-						"found frame start " + start + " end " + end);
-					byte[] b = new byte[end-start+2];
-					System.arraycopy(mBuffer, start, b, 0, b.length);
-					mHandler.obtainMessage(PICTURE_AVAILABLE, 0, b.length, 
-							b).sendToTarget();
-					System.arraycopy(mBuffer, end+1, mBuffer, 0, head-end);
-					start=end=-1;
+					//if (D) Log.d(TAG,
+					//	"found frame start " + start + " end " + end);
+					for (i=0; i<end-start+2; i++)
+						sBuffer[i]=(byte)(mBuffer[i+start]&0xff);
+					mHandler.post(new NewFrame(start, end+2));
+					
+					//b = new byte[head-end+2];
+					//System.arraycopy(mBuffer, end, b, 0, b.length);
+					//System.arraycopy(b, 0, mBuffer, 0, b.length);
+					//head=b.length;
 					head=0;
+					start=end=-1;
+					if (dirty)
+						dirty = false;
 				}
 			} catch (IOException e) {
 				e.printStackTrace();
@@ -234,5 +269,24 @@ public class AIRiService extends Thread {
 		}
 		mHandler.obtainMessage(CONNECTION_FINISHED).sendToTarget();
 		sInstance = null;
+	}
+	
+	public boolean isDirty(){
+		return dirty;
+	}
+	
+	class NewFrame implements Runnable {
+		int start, end;
+		public NewFrame(int start, int end){
+			this.start = start;
+			this.end = end;
+		}
+			
+		@Override
+		public void run() {
+			mHandler.obtainMessage(PICTURE_AVAILABLE, 0, end-start, 
+					sBuffer).sendToTarget();
+		}
+		
 	}
 }
