@@ -39,6 +39,17 @@ public class AIRiActivity extends Activity {
 	private ImageView mImgDisplay;
 	private SharedPreferences mPreferences;
 	
+	// juergen state when to save pictures to a file
+	private boolean doSaveImage;
+
+	public boolean isDoSaveImage() {
+		return doSaveImage;
+	}
+
+	public void setDoSaveImage( boolean doSaveImage ) {
+		this.doSaveImage = doSaveImage;
+	}	
+
 	enum STATES {
 		IDLE,
 		SCANNING,
@@ -47,6 +58,7 @@ public class AIRiActivity extends Activity {
 		CONNECTED,
 	}
 	private STATES mState;
+	
 	
 	public static final String SETTINGS="AIRiNativeSettings";
 	public static final String SETTINGS_TARGET="target";
@@ -150,15 +162,17 @@ public class AIRiActivity extends Activity {
     }
 	
 	private void BluetoothConnected(){
-		if (D)Log.d(TAG, "BluetoothDisconnected");
+		if (D)Log.d(TAG, "BluetoothConnected");
 		mState = STATES.CONNECTED;
-		this.runOnUiThread(new Runnable(){
+		this.runOnUiThread( new Runnable() {
 			public void run(){
 				Toast.makeText(getApplicationContext(), 
 						getString(R.string.connection_ok), Toast.LENGTH_LONG).show();
 				try{
-					mService.setSize(AIRiService.SIZE.QVGA);
-					mService.setLink(true);
+					if (mService != null) {
+						mService.setSize(AIRiService.SIZE.QVGA);
+						mService.setLink(true);
+					}
 				} catch (Exception e){
 					Log.e(TAG, "found issue", e);
 					disconnect();
@@ -221,6 +235,10 @@ public class AIRiActivity extends Activity {
 			case AIRiService.PICTURE_AVAILABLE:
 				byte[] frame = (byte[])msg.obj;
 				NewFrame(frame);
+				if( isDoSaveImage() ) {
+					SaveImage( frame );
+					setDoSaveImage( false );
+				}
 				break;
 			case AIRiService.CONNECTION_FINISHED:
 				BluetoothDisconnected();
@@ -233,6 +251,11 @@ public class AIRiActivity extends Activity {
 				break;
 			}
 		}
+
+		private void SaveImage(byte[] frame) {
+			// TODO Auto-generated method stub
+			// NOTHING YET
+		}
 		
 	};
 
@@ -243,6 +266,9 @@ public class AIRiActivity extends Activity {
 	private static final int MENU_FLASH=5;
 	private static final int MENU_PAN=6;
 	private static final int MENU_EXPOSURE=7;
+	
+	//juergen added store image in a file 
+	private static final int MENU_SAVEIMAGE=8;
 	
 	private static final int MENU_SIZE_QVGA=100;
 	private static final int MENU_SIZE_VGA=101;
@@ -273,11 +299,14 @@ public class AIRiActivity extends Activity {
 	public boolean onPrepareOptionsMenu(Menu menu) {
 		menu.clear();
 		if (mState!=STATES.IDLE){
-			menu.add(0, MENU_DISCONNECT, 0, this.getString(R.string.bluetooth_disconnect));
+			// juergen: added save image
+			menu.add(0, MENU_SAVEIMAGE, 0, this.getString(R.string.save_image));
+
+			menu.add(0, MENU_DISCONNECT, 1, this.getString(R.string.bluetooth_disconnect));
 			if (this.mPreferences.contains(SETTINGS_TARGET))
 				menu.add(0, MENU_FORGET, 1, this.getString(R.string.bluetooth_forget));
 			
-			SubMenu s = menu.addSubMenu(0, MENU_SIZE, 1, this.getString(R.string.menu_size));
+			SubMenu s = menu.addSubMenu(0, MENU_SIZE, 2, this.getString(R.string.menu_size));
 			s.add(0, MENU_SIZE_QVGA, 0, "QVGA");
 			s.add(0, MENU_SIZE_VGA, 1, "VGA");
 			s.add(0, MENU_SIZE_XGA, 2, "XGA");
@@ -287,17 +316,17 @@ public class AIRiActivity extends Activity {
 			s.add(0, MENU_SIZE_QVGA_Z2, 6, "QVGA Zoom 2");
 			s.add(0, MENU_SIZE_QVGA_Z3, 7, "QVGA Zoom 3");
 			
-			s = menu.addSubMenu(0, MENU_FLASH, 2, this.getString(R.string.menu_flash));
+			s = menu.addSubMenu(0, MENU_FLASH, 3, this.getString(R.string.menu_flash));
 			s.add(0, MENU_FLASH_ON, 0, this.getString(R.string.on));
 			s.add(0, MENU_FLASH_OFF, 1, this.getString(R.string.off));
 			
-			s = menu.addSubMenu(0, MENU_PAN, 3, this.getString(R.string.menu_pan));
+			s = menu.addSubMenu(0, MENU_PAN, 4, this.getString(R.string.menu_pan));
 			s.add(0, MENU_PAN_U, 0, this.getString(R.string.menu_pan_u));
 			s.add(0, MENU_PAN_L, 1, this.getString(R.string.menu_pan_l));
 			s.add(0, MENU_PAN_D, 2, this.getString(R.string.menu_pan_d));
 			s.add(0, MENU_PAN_R, 3, this.getString(R.string.menu_pan_r));
 			
-			s = menu.addSubMenu(0, MENU_EXPOSURE, 4, this.getString(R.string.menu_exposure));
+			s = menu.addSubMenu(0, MENU_EXPOSURE, 5, this.getString(R.string.menu_exposure));
 			s.add(0, MENU_EXPOSURE_66, 0, "66ms");
 			s.add(0, MENU_EXPOSURE_135, 1, "135ms");
 			s.add(0, MENU_EXPOSURE_270, 0, "270ms");
@@ -314,7 +343,7 @@ public class AIRiActivity extends Activity {
 
 	private void disconnect()
 	{
-		if (mService!=null)
+		if (mService != null)
 			mService.stopService();
 		try {
 			
@@ -334,6 +363,8 @@ public class AIRiActivity extends Activity {
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		switch (item.getItemId()){
+		// juergen added save image
+		
 		case MENU_FORGET:
 			Editor ed = this.mPreferences.edit();
 			ed.remove(SETTINGS_TARGET);
@@ -417,7 +448,14 @@ public class AIRiActivity extends Activity {
 			if (this.mState==STATES.CONNECTED)
 				this.mService.setExposure(item.getItemId()-MENU_EXPOSURE_BASE);
 			return true;
+
+		case MENU_SAVEIMAGE:
+			this.setDoSaveImage( true );
+			return true;
+			
+		
 		}
 		return super.onOptionsItemSelected(item);
-	}	
+	}
+
 }

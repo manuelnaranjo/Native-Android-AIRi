@@ -10,19 +10,30 @@ import android.os.Handler;
 import android.util.Log;
 
 public class AIRiService extends Thread {
-	private final static int BUFFER_SIZE=2048*1536/5; // asume worst compression level is 20%
-	private final static int BLOCK_SIZE=1024;
+	private final static int BUFFER_SIZE=256*1024; // max size of any picture
+	// we read max 256 bytes, usually we get RFCOMM packages of 127 bytes
+	private final static int BLOCK_SIZE=256;
+	
 	public final static int CONNECTION_STABLISHED = 1;
 	public final static int CONNECTION_FINISHED = 2;
 	public final static int CONNECTION_FAILED = 3;
 	public final static int PICTURE_AVAILABLE = 4;
 	public final static int OUT_OF_MEMORY = -1;
+	
 	private final BluetoothSocket mSocket;
-	private int head;
 	private InputStream mIn;
 	private OutputStream mOut;
 	private final Handler mHandler;
-	private static byte[] mBuffer;
+	
+	// juergen: changed buffering
+	public static byte[] readBuffer;
+	public static byte[] mBuffer;
+	private int head;
+	
+	public enum BUFSTATE { NOIMG, COPYING };
+	public BUFSTATE mBufUsing = BUFSTATE.NOIMG;
+	private enum IMGSTATE { FF_ATTN, NORMAL }
+	private IMGSTATE mImageState = IMGSTATE.NORMAL;
 	
 	private boolean running;
 	
@@ -49,7 +60,7 @@ public class AIRiService extends Thread {
 	
 	private static AIRiService sInstance;
 	
-	public AIRiService(BluetoothSocket socket, Handler handler){
+	public AIRiService( BluetoothSocket socket, Handler handler ){
 		super();
 		
 		if (sInstance != null) 
@@ -59,9 +70,21 @@ public class AIRiService extends Thread {
 		this.mSocket = socket;
 		this.head = 0;
 		this.mHandler = handler;
+		// readBuffer, 256 Bytes
+		if (readBuffer == null)
+			try {
+				readBuffer = new byte[BLOCK_SIZE];
+			} catch (OutOfMemoryError e) {
+				Log.e(TAG, "out of RAM", e);
+				mHandler.obtainMessage(OUT_OF_MEMORY, BLOCK_SIZE).sendToTarget();
+				this.running = false;
+				return;
+			}
+		// buffer A = 256k
 		if (mBuffer == null)
 			try {
 				mBuffer = new byte[BUFFER_SIZE];
+				head = 0;
 			} catch (OutOfMemoryError e) {
 				Log.e(TAG, "out of RAM", e);
 				mHandler.obtainMessage(OUT_OF_MEMORY, BUFFER_SIZE).sendToTarget();
@@ -98,7 +121,7 @@ public class AIRiService extends Thread {
 		}
 		return false;
 	}
-
+	
 	public boolean setSize(SIZE s) {
 		String arg = "";
 		if (s==SIZE.QVGA)
@@ -184,8 +207,7 @@ public class AIRiService extends Thread {
 			return;
 		}
 		
-		int i, start=-1, end=-1;
-		int read;
+		int i, read;
 		
 		mHandler.postDelayed(new Runnable(){
 			public void run() {
@@ -193,39 +215,65 @@ public class AIRiService extends Thread {
 			}
 		}, 1000);
 		
-		//allocate enough space for a full non compressed frame
+		//process each block that comes from the BT socket
 		while (this.running){
 			try {
-				read=this.mIn.read(mBuffer, head, BLOCK_SIZE);
-				if (D)Log.d(TAG, "Read " + read + " head " + head);
-				for (i=0; i<head+read; i++){
-					if (mBuffer[i]==-1) { 
-						//bytes in java are signed, so we can't just compare to 0xff
-						//if (D)Log.d(TAG, "Found 0xff " + i);
-						i++;
-						if (mBuffer[i]==-40){
-							if (D)Log.d(TAG, "Found 0xd8 " + i);
-							start = i-1;
-						} else if (mBuffer[i]==-39) {
-							if (D)Log.d(TAG, "Found 0xd9 " + i);
-							end = i-1;
-							if (start>-1 && end>start)
-								i=head+read; // force loop to complete
-						}
-					}
-				}
-				head+=read;
+				// get next block, read up to 512 Bytes
+				read = this.mIn.read( readBuffer, 0, BLOCK_SIZE );
+				if (D)Log.d(TAG, "Read " + read + " head " + head );
+				
+				// copy bytes to buffer, look for start of image 
+				for( i=0; i < read; i++ ){
 					
-				if (start>-1 && end>start){
-					if (D) Log.d(TAG,
-						"found frame start " + start + " end " + end);
-					byte[] b = new byte[end-start+2];
-					System.arraycopy(mBuffer, start, b, 0, b.length);
-					mHandler.obtainMessage(PICTURE_AVAILABLE, 0, b.length, 
-							b).sendToTarget();
-					System.arraycopy(mBuffer, end+1, mBuffer, 0, head-end);
-					start=end=-1;
-					head=0;
+					// state NORMAL
+					if( mImageState == IMGSTATE.NORMAL ) {
+
+						// after JPEG_START we copy the JPEG byte into buffer
+						if( mBufUsing == BUFSTATE.COPYING )
+							mBuffer[ head++ ] = readBuffer[ i ];
+						// change state if we got an 0xFF
+						if( readBuffer[ i ] == -1 )
+							mImageState = IMGSTATE.FF_ATTN;
+						
+					// state 0xFF was read before
+					} else if( mImageState == IMGSTATE.FF_ATTN ) {
+					
+						// 0xD8 START JPEG
+						if( readBuffer[ i ] == -40 ) { 
+							// start new image at index zero
+							if (D)Log.d(TAG, "JPEG start" );
+							mImageState = IMGSTATE.NORMAL;
+							mBufUsing = BUFSTATE.COPYING;
+							// process the previous ignored 0xFF
+							mBuffer[ 0 ] = -1;
+							mBuffer[ 1 ] = readBuffer[ i ];
+							head = 2;
+		
+						// 0xD9 END JPEG
+						} else if( readBuffer[ i ] == -39 ){ 
+							if (D)Log.d(TAG, "JPEG size " + head );
+							// this is a END IMAGE then
+							mImageState = IMGSTATE.NORMAL;
+							mBufUsing = BUFSTATE.NOIMG;
+							
+							// write end marker into buffer
+							mBuffer[ head++ ] = readBuffer[ i ];
+							
+							// make message and send
+							byte[] b = new byte[ head ];
+							System.arraycopy( mBuffer, 0, b, 0, b.length);
+							// send message which buffer has the image
+							mHandler.obtainMessage( PICTURE_AVAILABLE, 0, head, b ).sendToTarget();
+														
+						} else { 
+							// everything else, just copy and back to normal
+							mBuffer[ head++ ] = readBuffer[ i ];
+							mImageState = IMGSTATE.NORMAL;
+						}
+							
+					}
+					
+
 				}
 			} catch (IOException e) {
 				e.printStackTrace();

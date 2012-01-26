@@ -13,6 +13,7 @@
 	<string name="bluetooth_connect">Connect to Camera</string>
 	<string name="bluetooth_disconnect">Disconnect from Camera</string>
 	<string name="bluetooth_forget">Forget Camera</string>
+	<string name="save_image">Save Image</string>
 	
 	<string name="menu_size">Resolution</string>
 	<string name="menu_flash">Flash</string>
