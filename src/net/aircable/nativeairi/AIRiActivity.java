@@ -1,6 +1,11 @@
 package net.aircable.nativeairi;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 import net.aircable.nativeairi.AIRiService.PAN;
 import net.aircable.nativeairi.AIRiService.SIZE;
@@ -15,6 +20,7 @@ import android.content.SharedPreferences.Editor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
@@ -47,6 +53,7 @@ public class AIRiActivity extends Activity {
 	}
 
 	public void setDoSaveImage( boolean doSaveImage ) {
+		
 		this.doSaveImage = doSaveImage;
 	}	
 
@@ -252,10 +259,39 @@ public class AIRiActivity extends Activity {
 			}
 		}
 
-		private void SaveImage(byte[] frame) {
-			// TODO Auto-generated method stub
-			// NOTHING YET
+		private void SaveImage( byte[] imageData ) {
+
+			SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd hh.mm.ss");
+			FileOutputStream sdImageStream = null;
+			File sdImageFile = null;
+			
+			// get access to the external SD card storage
+			String newFolder = "/DCIM/AIRiImages";
+			String extStorageDirectory = Environment.getExternalStorageDirectory().toString();
+			File myNewFolder = new File( extStorageDirectory + newFolder );
+			myNewFolder.mkdir(); // ignore return if successful or not or already exist
+			
+			try {
+
+				sdImageFile = new File( myNewFolder.toString() + "/Img-" + simpleDateFormat.format( new Date() ) + ".jpg" );
+				sdImageStream = new FileOutputStream( sdImageFile );						
+				if (D) Log.d(TAG, "File created " + sdImageFile.toString() );
+
+				sdImageStream.write( imageData );
+				sdImageStream.flush();
+				sdImageStream.close();
+				
+				Toast.makeText( getApplicationContext(), "Saved", Toast.LENGTH_LONG ).show();
+	
+			} catch (FileNotFoundException e) {
+				if (D) Log.d(TAG, "File not created" );
+				// just ignore
+			} catch (IOException e) {
+				if (D) Log.d(TAG, "File IO error" );
+				// just ignore
+			}
 		}
+
 		
 	};
 
